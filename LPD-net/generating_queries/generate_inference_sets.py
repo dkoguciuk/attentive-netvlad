@@ -7,8 +7,8 @@ import pickle
 import random
 
 #####For training and test data split#####
-x_width=1.5
-y_width=1.5
+x_width=150
+y_width=150
 
 #For Oxford
 p1=[5735712.768124,620084.402381]
@@ -121,3 +121,4 @@ for index in bus_index:
 print(folders)
 construct_query_and_database_sets(base_path, runs_folder, folders, "/pointcloud_25m_25/", "pointcloud_centroids_25.csv", p_dict["business"], "business")
 '''
+

@@ -7,8 +7,8 @@ import pickle
 import random
 
 #####For training and test data split#####
-x_width=1.5
-y_width=1.5
+x_width=150
+y_width=150
 
 #For Oxford
 p1=[5735712.768124,620084.402381]
@@ -50,7 +50,6 @@ def construct_query_and_database_sets(base_path, runs_folder, folders, pointclou
 		print(folder)
 		df_database= pd.DataFrame(columns=['file','northing','easting'])
 		df_test= pd.DataFrame(columns=['file','northing','easting'])
-		
 		df_locations= pd.read_csv(os.path.join(base_path,runs_folder,folder,filename),sep=',')
 		# df_locations['timestamp']=runs_folder+folder+pointcloud_fols+df_locations['timestamp'].astype(str)+'.bin'
 		# df_locations=df_locations.rename(columns={'timestamp':'file'})
