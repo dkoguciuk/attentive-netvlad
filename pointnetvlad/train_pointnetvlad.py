@@ -15,7 +15,8 @@ from pointnetvlad_att_cls import *
 from loading_pointclouds import *
 from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KDTree
-
+sys.path.append(os.path.join(BASE_DIR, '..'))
+from mutual_attention_layer import MutualAttentionLayer, lazy_quadruplet_loss_with_att
 
 #params
 parser = argparse.ArgumentParser()
@@ -32,6 +33,7 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--margin_1', type=float, default=0.5, help='Margin for hinge loss [default: 0.5]')
 parser.add_argument('--margin_2', type=float, default=0.2, help='Margin for hinge loss [default: 0.2]')
+parser.add_argument('--with-att', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
 FLAGS = parser.parse_args()
 
 BATCH_NUM_QUERIES = FLAGS.batch_num_queries
@@ -48,6 +50,7 @@ DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 MARGIN1 = FLAGS.margin_1
 MARGIN2 = FLAGS.margin_2
+WITH_ATT = FLAGS.with_att
 
 TRAIN_FILE = 'generating_queries/training_queries_baseline.pickle'
 TEST_FILE = 'generating_queries/test_queries_baseline.pickle'
@@ -126,20 +129,26 @@ def train():
                 print('neg_vecs', neg_vecs)
                 print('other_neg_vec', other_neg_vec)
 
-            # placeholder for attention layer
-            attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
-            attention_input_sample = tf.placeholder(tf.float32, shape=(None, 1024, 64))
+            if WITH_ATT:
 
-            # Mutual attention layer
-            mutual_attention = MutualAttentionLayer()
+                # placeholder for attention layer
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(None, 1024, 64))
 
-            # Attention op
-            attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+                # Mutual attention layer
+                mutual_attention = MutualAttentionLayer()
 
-            #loss = lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
-            #loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
-            #loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
-            loss = lazy_quadruplet_loss(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+                # Attention op
+                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+
+                # Loss
+                loss = lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec,
+                                                     MARGIN1, MARGIN2)
+            else:
+                #loss = lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
+                #loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
+                #loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+                loss = lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
             tf.summary.scalar('loss', loss)
 
             # Get training operator
@@ -195,10 +204,12 @@ def train():
                'q_vec':q_vec,
                'pos_vecs': pos_vecs,
                'neg_vecs': neg_vecs,
-               'other_neg_vec': other_neg_vec,
-               'attention_op': attention_op,
-               'attention_input_query': attention_input_query,
-               'attention_input_sample': attention_input_sample}
+               'other_neg_vec': other_neg_vec}
+
+        if WITH_ATT:
+            ops['attention_op'] = attention_op
+            ops['attention_input_query'] = attention_input_query
+            ops['attention_input_sample'] = attention_input_sample
 
 
         for epoch in range(MAX_EPOCH):

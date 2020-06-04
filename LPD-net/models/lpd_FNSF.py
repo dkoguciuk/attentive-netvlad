@@ -18,23 +18,24 @@ import tf_util
 from transform_nets import input_transform_net, feature_transform_net, neural_feature_net
 
 #Adopted from Antoine Meich
+sys.path.append(os.path.join(MODELS_DIR, '../../'))
 import loupe as lp
 
-
+CLUSTER_SIZE = 64
+OUTPUT_DIM = 256
+FEATURE_SIZE = 1024
 
 def placeholder_inputs(batch_num_queries, num_pointclouds_per_query, num_point):
     pointclouds_pl = tf.placeholder(tf.float32, shape=(batch_num_queries, num_pointclouds_per_query, num_point, 13))
     return pointclouds_pl
 
 #Adopted from the original pointnet code
-def forward(point_cloud, is_training, bn_decay=None):
+def forward(point_cloud, is_training, bn_decay=None, with_att=False):
     """LPD-Net:FNSF,    INPUT is batch_num_queries X num_pointclouds_per_query X num_points_per_pointcloud X 13,
                         OUTPUT batch_num_queries X num_pointclouds_per_query X output_dim """
     batch_num_queries = point_cloud.get_shape()[0].value
     num_pointclouds_per_query = point_cloud.get_shape()[1].value
     num_points = point_cloud.get_shape()[2].value
-    CLUSTER_SIZE=64
-    OUTPUT_DIM=256
     k=20
     point_cloud = tf.reshape(point_cloud, [batch_num_queries*num_pointclouds_per_query, num_points,13])
 
@@ -117,18 +118,37 @@ def forward(point_cloud, is_training, bn_decay=None):
                          scope='conv5', bn_decay=bn_decay)
     point_wise_feature = net
 
-    NetVLAD = lp.NetVLAD(feature_size=1024, max_samples=num_points, cluster_size=CLUSTER_SIZE, 
-                    output_dim=OUTPUT_DIM, gating=True, add_batch_norm=True,
-                    is_training=is_training)
+    # Prepare features for NetVLAD
+    net = tf.reshape(net, [-1, FEATURE_SIZE])
+    net = tf.nn.l2_normalize(net, 1)
 
-    net= tf.reshape(net,[-1,1024])
-    net = tf.nn.l2_normalize(net,1)
-    output = NetVLAD.forward(net)
-    print(output)
+    # With mutual attention?
+    if with_att:
 
-    #normalize to have norm 1
-    output = tf.nn.l2_normalize(output,1)
-    output =  tf.reshape(output,[batch_num_queries,num_pointclouds_per_query,OUTPUT_DIM])
+        NetVLAD = lp.NetVLADAtt(feature_size=FEATURE_SIZE, max_samples=num_points, cluster_size=CLUSTER_SIZE,
+                                output_dim=OUTPUT_DIM, gating=False, add_batch_norm=True,
+                                is_training=is_training)
+
+        output = NetVLAD.forward(net)
+        print(output)
+
+        # Reshape output
+        output = tf.reshape(output, [batch_num_queries, num_pointclouds_per_query, output.shape[-2], output.shape[-1]])
+
+    # Standard NetVLAD
+    else:
+        NetVLAD = lp.NetVLAD(feature_size=FEATURE_SIZE, max_samples=num_points, cluster_size=CLUSTER_SIZE,
+                        output_dim=OUTPUT_DIM, gating=True, add_batch_norm=True,
+                        is_training=is_training)
+
+        output = NetVLAD.forward(net)
+        print(output)
+
+        #normalize to have norm 1
+        output = tf.nn.l2_normalize(output,1)
+
+        # Reshape output
+        output =  tf.reshape(output,[batch_num_queries,num_pointclouds_per_query,OUTPUT_DIM])
 
     return output
 
@@ -141,8 +161,6 @@ def best_pos_distance(query, pos_vecs):
         best_pos=tf.reduce_min(tf.reduce_sum(tf.squared_difference(pos_vecs,query_copies),2),1)
         #best_pos=tf.reduce_max(tf.reduce_sum(tf.squared_difference(pos_vecs,query_copies),2),1)
         return best_pos
-
-
 
 ##########Losses for PointNetVLAD###########
 

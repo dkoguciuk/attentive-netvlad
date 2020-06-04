@@ -7,6 +7,7 @@ import importlib
 import os
 import sys
 import time
+from tqdm import tqdm
 import tensorflow as tf
 import numpy as np
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +17,8 @@ sys.path.append(os.path.join(BASE_DIR, 'models'))
 sys.path.append(os.path.join(BASE_DIR, 'utils'))
 from loading_pointclouds import *
 from sklearn.neighbors import KDTree
+sys.path.append(os.path.join(BASE_DIR, '..'))
+from mutual_attention_layer import MutualAttentionLayer, lazy_quadruplet_loss_with_att
 
 #params
 parser = argparse.ArgumentParser()
@@ -34,6 +37,7 @@ parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate fo
 parser.add_argument('--margin_1', type=float, default=0.5, help='Margin for hinge loss [default: 0.5]')
 parser.add_argument('--margin_2', type=float, default=0.2, help='Margin for hinge loss [default: 0.2]')
 parser.add_argument('--restore', type=int, default=0, help='Train with the stored model(0:No 1:Yes) [default: 0]')
+parser.add_argument('--with-att', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
 FLAGS = parser.parse_args()
 
 RESTORE = FLAGS.restore
@@ -69,6 +73,7 @@ DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 MARGIN1 = FLAGS.margin_1
 MARGIN2 = FLAGS.margin_2
+WITH_ATT = FLAGS.with_att
 
 # Generated training queies
 TRAIN_FILE = 'generating_queries/training_queries_baseline.pickle'
@@ -133,17 +138,34 @@ def train():
             with tf.variable_scope("query_triplets") as scope:
                 vecs= tf.concat([query, positives, negatives, other_negatives],1)
                 print(vecs)                
-                out_vecs= MODEL.forward(vecs, is_training_pl, bn_decay=bn_decay)
+                out_vecs= MODEL.forward(vecs, is_training_pl, bn_decay=bn_decay, with_att=WITH_ATT)
                 q_vec, pos_vecs, neg_vecs, other_neg_vec= tf.split(out_vecs, [1,POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY,1],1)
                 print(q_vec)
                 print(pos_vecs)
                 print(neg_vecs)
                 print(other_neg_vec)
 
-            #loss = MODEL.lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
-            #loss = MODEL.softmargin_loss(q_vec, pos_vecs, neg_vecs)
-            #loss = MODEL.quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
-            loss = MODEL.lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+            if WITH_ATT:
+
+                # placeholder for attention layer
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(None, 1024, 64))
+
+                # Mutual attention layer
+                mutual_attention = MutualAttentionLayer()
+
+                # Attention op
+                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+
+                # Loss
+                loss = lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec,
+                                                     MARGIN1, MARGIN2)
+            else:
+                #loss = MODEL.lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
+                #loss = MODEL.softmargin_loss(q_vec, pos_vecs, neg_vecs)
+                #loss = MODEL.quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+                loss = MODEL.lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+
             tf.summary.scalar('loss', loss)
 
             # Get training operator
@@ -202,6 +224,10 @@ def train():
                'neg_vecs': neg_vecs,
                'other_neg_vec': other_neg_vec}
 
+        if WITH_ATT:
+            ops['attention_op'] = attention_op
+            ops['attention_input_query'] = attention_input_query
+            ops['attention_input_sample'] = attention_input_sample
 
         for epoch in range(MAX_EPOCH):
             print(epoch)
@@ -248,7 +274,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
                 negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
-                hard_negs= get_random_hard_negatives(query, negatives, num_to_take)
+                hard_negs= get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
                 print(hard_negs)
                 q_tuples.append(get_query_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
                 # q_tuples.append(get_rotated_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
@@ -257,7 +283,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
                 negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
-                hard_negs= get_random_hard_negatives(query, negatives, num_to_take)
+                hard_negs= get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
                 hard_negs= list(set().union(HARD_NEGATIVES[batch_keys[j]], hard_negs))
                 print('hard',hard_negs)
                 q_tuples.append(get_query_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))           
@@ -394,19 +420,53 @@ def get_feature_representation(filename, sess, ops):
     output=np.squeeze(output)
     return output
 
-def get_random_hard_negatives(query_vec, random_negs, num_to_take):
+
+def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
     global TRAINING_LATENT_VECTORS
 
-    latent_vecs=[]
+    latent_vecs = []
     for j in range(len(random_negs)):
         latent_vecs.append(TRAINING_LATENT_VECTORS[random_negs[j]])
-    
-    latent_vecs=np.array(latent_vecs)
-    nbrs = KDTree(latent_vecs)
-    distances, indices = nbrs.query(np.array([query_vec]),k=num_to_take)
-    hard_negs=np.squeeze(np.array(random_negs)[indices[0]])
-    hard_negs= hard_negs.tolist()
+
+    latent_vecs = np.array(latent_vecs)
+
+    ###########################################################################
+    # WITH ATTENTION
+    ###########################################################################
+
+    if len(latent_vecs.shape) == 3:
+
+        feed_dict = {ops['attention_input_query']: np.expand_dims(query_vec, axis=0),
+                     ops['attention_input_sample']: latent_vecs,
+                     ops['is_training_pl']: False}
+        distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
+
+        # Take n closest
+        indices = np.argsort(distances)[:num_to_take]
+        # distances = distances[indices]
+
+        # Add one more dim to be consistent with kdtree impl
+        indices = np.expand_dims(indices, axis=0)
+
+        # print('distances', distances.shape)
+        # print('indices', indices.shape)
+
+    ###########################################################################
+    # WITHOUT ATTENTION:
+    ###########################################################################
+
+    else:
+
+        nbrs = KDTree(latent_vecs)
+        distances, indices = nbrs.query(np.array([query_vec]), k=num_to_take)
+
+        # print('distances', distances.shape)
+        # print('indices', indices.shape)
+
+    hard_negs = np.squeeze(np.array(random_negs)[indices[0]])
+    hard_negs = hard_negs.tolist()
     return hard_negs
+
 
 def get_latent_vectors(sess, ops, dict_to_process):
     is_training=False
@@ -414,7 +474,7 @@ def get_latent_vectors(sess, ops, dict_to_process):
 
     batch_num= BATCH_NUM_QUERIES*(1+POSITIVES_PER_QUERY+NEGATIVES_PER_QUERY+1)
     q_output = []
-    for q_index in range(len(train_file_idxs)//batch_num):
+    for q_index in tqdm(range(len(train_file_idxs)//batch_num)):
         file_indices=train_file_idxs[q_index*batch_num:(q_index+1)*(batch_num)]
         file_names=[]
         for index in file_indices:
@@ -436,41 +496,60 @@ def get_latent_vectors(sess, ops, dict_to_process):
         feed_dict={ops['query']:q1, ops['positives']:q2, ops['negatives']:q3,ops['other_negatives']:q4, ops['is_training_pl']:is_training}
         o1, o2, o3, o4=sess.run([ops['q_vec'], ops['pos_vecs'], ops['neg_vecs'], ops['other_neg_vec']], feed_dict=feed_dict)
         
-        o1=np.reshape(o1,(-1,o1.shape[-1]))
-        o2=np.reshape(o2,(-1,o2.shape[-1]))
-        o3=np.reshape(o3,(-1,o3.shape[-1]))
-        o4=np.reshape(o4,(-1,o4.shape[-1]))        
+        if len(o1.shape) == 3:
+            o1=np.reshape(o1, (-1, o1.shape[-1]))
+            o2=np.reshape(o2, (-1, o2.shape[-1]))
+            o3=np.reshape(o3, (-1, o3.shape[-1]))
+            o4=np.reshape(o4, (-1, o4.shape[-1]))
+        elif len(o1.shape) == 4:
+            o1 = np.reshape(o1, (-1, o1.shape[-2], o1.shape[-1]))
+            o2 = np.reshape(o2, (-1, o2.shape[-2], o2.shape[-1]))
+            o3 = np.reshape(o3, (-1, o3.shape[-2], o3.shape[-1]))
+            o4 = np.reshape(o4, (-1, o4.shape[-2], o4.shape[-1]))
+        else:
+            assert ValueError('Wrong number of dimensions')        
 
         out=np.vstack((o1,o2,o3,o4))
         q_output.append(out)
 
-    q_output=np.array(q_output)
-    if(len(q_output)!=0):  
-        q_output=q_output.reshape(-1,q_output.shape[-1])
-
-    #handle edge case
-    for q_index in range((len(train_file_idxs)//batch_num*batch_num),len(dict_to_process.keys())):
-        index=train_file_idxs[q_index]
-        queries=load_pc_files([dict_to_process[index]["query"]])
-        queries= np.expand_dims(queries,axis=1)
-
-        if(BATCH_NUM_QUERIES-1>0):
-            fake_queries=np.zeros((BATCH_NUM_QUERIES-1,1,NUM_POINTS,13))
-            q=np.vstack((queries,fake_queries))
+    q_output = np.array(q_output)
+    if len(q_output) != 0:
+        if len(q_output.shape) == 3:
+            q_output = q_output.reshape(-1, q_output.shape[-1])
+        elif len(q_output.shape) == 4:
+            q_output = q_output.reshape(-1, q_output.shape[-2], q_output.shape[-1])
         else:
-            q=queries
+            assert ValueError('Wrong number of dimensions')
 
-        fake_pos=np.zeros((BATCH_NUM_QUERIES,POSITIVES_PER_QUERY,NUM_POINTS,13))
-        fake_neg=np.zeros((BATCH_NUM_QUERIES,NEGATIVES_PER_QUERY,NUM_POINTS,13))
-        fake_other_neg=np.zeros((BATCH_NUM_QUERIES,1,NUM_POINTS,13))
-        feed_dict={ops['query']:q, ops['positives']:fake_pos, ops['negatives']:fake_neg, ops['other_negatives']:fake_other_neg, ops['is_training_pl']:is_training}
-        output=sess.run(ops['q_vec'], feed_dict=feed_dict)
-        output=output[0]
-        output=np.squeeze(output)
-        if (q_output.shape[0]!=0):
-            q_output=np.vstack((q_output,output))
+    # handle edge case
+    for q_index in tqdm(range((len(train_file_idxs) // batch_num * batch_num), len(dict_to_process.keys()))):
+        index = train_file_idxs[q_index]
+        queries = load_pc_files([dict_to_process[index]["query"]])
+        queries = np.expand_dims(queries, axis=1)
+
+        if BATCH_NUM_QUERIES-1 > 0:
+            fake_queries = np.zeros((BATCH_NUM_QUERIES-1, 1, NUM_POINTS, 13))
+            q = np.vstack((queries, fake_queries))
         else:
-            q_output=output
+            q = queries
+
+        fake_pos = np.zeros((BATCH_NUM_QUERIES, POSITIVES_PER_QUERY, NUM_POINTS, 13))
+        fake_neg = np.zeros((BATCH_NUM_QUERIES, NEGATIVES_PER_QUERY, NUM_POINTS, 13))
+        fake_other_neg = np.zeros((BATCH_NUM_QUERIES, 1, NUM_POINTS, 13))
+        feed_dict = {ops['query']: q, ops['positives']: fake_pos, ops['negatives']: fake_neg,
+                     ops['other_negatives']: fake_other_neg, ops['is_training_pl']: is_training}
+        output = sess.run(ops['q_vec'], feed_dict=feed_dict)
+        output = output[0]
+        output = np.squeeze(output)
+        if q_output.shape[0] != 0:
+            if len(q_output.shape) == 2:
+                q_output = np.vstack((q_output, output))
+            elif len(q_output.shape) == 3:
+                q_output = np.vstack((q_output, np.expand_dims(output, axis=0)))
+            else:
+                assert ValueError('Wrong number of dimensions')
+        else:
+            q_output = output
 
     print(q_output.shape)
     return q_output
