@@ -18,7 +18,8 @@ sys.path.append(os.path.join(BASE_DIR, 'utils'))
 from loading_pointclouds import *
 from sklearn.neighbors import KDTree
 sys.path.append(os.path.join(BASE_DIR, '..'))
-from mutual_attention_layer import MutualAttentionLayer, lazy_quadruplet_loss_with_att
+from mutual_attention_layer import MutualAttentionLayer
+from mutual_attention_layer import lazy_quadruplet_loss_with_att
 
 #params
 parser = argparse.ArgumentParser()

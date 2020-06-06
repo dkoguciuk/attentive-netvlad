@@ -13,6 +13,9 @@ from pcan_cls import *
 from loading_pointclouds import *
 from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KDTree
+sys.path.append(os.path.join(BASE_DIR, '..'))
+from mutual_attention_layer import MutualAttentionLayer
+from mutual_attention_layer import lazy_quadruplet_loss_with_att
 
 #params
 parser = argparse.ArgumentParser()
@@ -29,11 +32,13 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--margin_1', type=float, default=0.5, help='Margin for hinge loss [default: 0.5]')
 parser.add_argument('--margin_2', type=float, default=0.2, help='Margin for hinge loss [default: 0.2]')
+parser.add_argument('--with-att', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
 FLAGS = parser.parse_args()
 
 BATCH_NUM_QUERIES = FLAGS.batch_num_queries
 EVAL_BATCH_SIZE = 1
 NUM_POINTS = 4096
+SAMPLED_NEG = 4000
 POSITIVES_PER_QUERY= FLAGS.positives_per_query
 NEGATIVES_PER_QUERY= FLAGS.negatives_per_query
 MAX_EPOCH = FLAGS.max_epoch
@@ -45,6 +50,7 @@ DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 MARGIN1 = FLAGS.margin_1
 MARGIN2 = FLAGS.margin_2
+WITH_ATT = FLAGS.with_att
 
 TRAIN_FILE = 'generating_queries/training_queries_baseline.pickle'
 TEST_FILE = 'generating_queries/test_queries_baseline.pickle'
@@ -114,7 +120,7 @@ def train():
             with tf.variable_scope("query_triplets") as scope:
                 vecs= tf.concat([query, positives, negatives, other_negatives],1)
                 print(vecs)                
-                out_vecs, weights= forward(vecs, is_training_pl, bn_decay=bn_decay)
+                out_vecs, weights= forward(vecs, is_training_pl, bn_decay=bn_decay, with_att=WITH_ATT)
                 print(out_vecs)
                 q_vec, pos_vecs, neg_vecs, other_neg_vec= tf.split(out_vecs, [1,POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY,1],1)
                 print(q_vec)
@@ -122,10 +128,28 @@ def train():
                 print(neg_vecs)
                 print(other_neg_vec)
 
-            #loss = lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
-            #loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
-            #loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
-            loss = lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+
+            if WITH_ATT:
+
+                # placeholder for attention layer
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 1024, 64))
+
+                # Mutual attention layer
+                mutual_attention = MutualAttentionLayer()
+
+                # Attention op
+                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+
+                # Loss
+                loss = lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec,
+                                                     MARGIN1, MARGIN2)
+            else:
+                # loss = lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
+                # loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
+                # loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+                loss = lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+
             #loss = SARE_loss(q_vec, pos_vecs, neg_vecs)
             tf.summary.scalar('loss', loss)
 
@@ -200,7 +224,6 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
     global TRAINING_LATENT_VECTORS
 
     is_training = True
-    sampled_neg=4000
     #number of hard negatives in the training tuple
     #which are taken from the sampled negatives
     num_to_take=5
@@ -229,7 +252,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
             elif(len(HARD_NEGATIVES.keys())==0):
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
-                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
+                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:SAMPLED_NEG]
                 hard_negs= get_random_hard_negatives(query, negatives, num_to_take)
                 print('hard_negs', hard_negs)
                 #q_tuples.append(get_query_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
@@ -238,7 +261,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
             else:
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
-                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
+                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:SAMPLED_NEG]
                 hard_negs= get_random_hard_negatives(query, negatives, num_to_take)
                 hard_negs= list(set().union(HARD_NEGATIVES[batch_keys[j]], hard_negs))
                 print('hard',hard_negs)

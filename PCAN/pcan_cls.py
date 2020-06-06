@@ -19,7 +19,7 @@ def placeholder_inputs(batch_num_queries, num_pointclouds_per_query, num_point):
     return pointclouds_pl
 
 #Adopted from the original pointnet code
-def forward(point_cloud, is_training, bn_decay=None):
+def forward(point_cloud, is_training, bn_decay=None, with_att=False):
     """PointNetVLAD,    INPUT is batch_num_queries X num_pointclouds_per_query X num_points_per_pointcloud X 3, 
                         OUTPUT batch_num_queries X num_pointclouds_per_query X output_dim """
     batch_num_queries = point_cloud.get_shape()[0].value
@@ -70,14 +70,17 @@ def forward(point_cloud, is_training, bn_decay=None):
     net= tf.reshape(net,[-1,1024])
     net = tf.nn.l2_normalize(net,1)
 
-    output, weights = vlad_forward(point_cloud_xyz, net, max_samples=num_points, is_training=is_training)
-
-
+    output, weights = vlad_forward(point_cloud_xyz, net, max_samples=num_points, is_training=is_training,
+                                   with_att=with_att)
     print(output)
 
-    #normalize to have norm 1
-    output = tf.nn.l2_normalize(output,1)
-    output =  tf.reshape(output,[batch_num_queries,num_pointclouds_per_query,OUTPUT_DIM])
+    if with_att:
+        # Reshape output
+        output = tf.reshape(output, [batch_num_queries, num_pointclouds_per_query, output.shape[-2], output.shape[-1]])
+    else:
+        # normalize to have norm 1
+        output = tf.nn.l2_normalize(output,1)
+        output =  tf.reshape(output,[batch_num_queries,num_pointclouds_per_query,OUTPUT_DIM])
 
     return output, weights
 
@@ -242,7 +245,7 @@ def lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg, m1, m2):
 
 def vlad_forward(xyz, reshaped_input, feature_size=1024, max_samples=4096, cluster_size=64,
                 output_dim=256, gating=True, add_batch_norm=True,
-                is_training=True, bn_decay=None):
+                is_training=True, bn_decay=None, with_att=False):
     """Forward pass of a NetVLAD block.
 
     Args:
@@ -291,6 +294,10 @@ def vlad_forward(xyz, reshaped_input, feature_size=1024, max_samples=4096, clust
 
     print('m:', m)
 
+    #######################################################################
+    # 1x1 conv
+    #######################################################################
+
     cluster_weights = tf.get_variable("cluster_weights",
                                       [feature_size, cluster_size],
                                       initializer=tf.random_normal_initializer(
@@ -310,6 +317,10 @@ def vlad_forward(xyz, reshaped_input, feature_size=1024, max_samples=4096, clust
     #       is_training=self.is_training,
     #       scope="cluster_bn")
 
+    #######################################################################
+    # Add batch norm after 1x1 conv
+    #######################################################################
+
     if add_batch_norm:
         activation = slim.batch_norm(
             activation,
@@ -317,6 +328,11 @@ def vlad_forward(xyz, reshaped_input, feature_size=1024, max_samples=4096, clust
             scale=True,
             is_training=is_training,
             scope="cluster_bn", fused=False)
+
+    #######################################################################
+    # Add bias after 1x1 conv
+    #######################################################################
+
     else:
         cluster_biases = tf.get_variable("cluster_biases",
                                          [cluster_size],
@@ -324,54 +340,76 @@ def vlad_forward(xyz, reshaped_input, feature_size=1024, max_samples=4096, clust
                                              stddev=1 / math.sqrt(feature_size)))
         activation = activation + cluster_biases
 
+    #######################################################################
+    # Soft assignment to clusters (softmax) after 1x1 conv
+    #######################################################################
+
     activation = tf.nn.softmax(activation)
-
     activation_crn = tf.multiply(activation, m)
+    activation = tf.reshape(activation_crn, [-1, max_samples, cluster_size])
 
-    activation = tf.reshape(activation_crn,
-                            [-1, max_samples, cluster_size])
+    #######################################################################
+    # Apply to VLAD core
+    #######################################################################
 
     a_sum = tf.reduce_sum(activation, -2, keepdims=True)
-
     cluster_weights2 = tf.get_variable("cluster_weights2",
                                        [1, feature_size, cluster_size],
                                        initializer=tf.random_normal_initializer(
                                            stddev=1 / math.sqrt(feature_size)))
-
     a = tf.multiply(a_sum, cluster_weights2)
 
     activation = tf.transpose(activation, perm=[0, 2, 1])
-
-    reshaped_input = tf.reshape(reshaped_input, [-1,
-                                                 max_samples, feature_size])
-
+    reshaped_input = tf.reshape(reshaped_input, [-1, max_samples, feature_size])
     vlad = tf.matmul(activation, reshaped_input)
     vlad = tf.transpose(vlad, perm=[0, 2, 1])
     vlad = tf.subtract(vlad, a)
 
+    #######################################################################
+    # Intra normalization
+    #######################################################################
+
     vlad = tf.nn.l2_normalize(vlad, 1)
 
-    vlad = tf.reshape(vlad, [-1, cluster_size * feature_size])
-    vlad = tf.nn.l2_normalize(vlad, 1)
+    if not with_att:
 
-    hidden1_weights = tf.get_variable("hidden1_weights",
-                                      [cluster_size * feature_size, output_dim],
-                                      initializer=tf.random_normal_initializer(
-                                          stddev=1 / math.sqrt(cluster_size)))
+        #######################################################################
+        # Global L2 normalization
+        #######################################################################
 
-    ##Tried using dropout
-    # vlad=tf.layers.dropout(vlad,rate=0.5,training=self.is_training)
+        vlad = tf.reshape(vlad, [-1, cluster_size * feature_size])
+        vlad = tf.nn.l2_normalize(vlad, 1)
 
-    vlad = tf.matmul(vlad, hidden1_weights)
+        #######################################################################
+        # Compression
+        #######################################################################
 
-    ##Added a batch norm
-    vlad = tf.contrib.layers.batch_norm(vlad,
-                                        center=True, scale=True,
-                                        is_training=is_training,
-                                        scope='bn')
+        hidden1_weights = tf.get_variable("hidden1_weights",
+                                          [cluster_size * feature_size, output_dim],
+                                          initializer=tf.random_normal_initializer(
+                                              stddev=1 / math.sqrt(cluster_size)))
 
-    if gating:
-        vlad = context_gating(vlad, add_batch_norm, is_training)
+        ##Tried using dropout
+        # vlad=tf.layers.dropout(vlad,rate=0.5,training=self.is_training)
+
+        vlad = tf.matmul(vlad, hidden1_weights)
+
+        ##Added a batch norm
+        vlad = tf.contrib.layers.batch_norm(vlad,
+                                            center=True, scale=True,
+                                            is_training=is_training,
+                                            scope='bn')
+
+        #######################################################################
+        # Gating
+        #######################################################################
+
+        if gating:
+            vlad = context_gating(vlad, add_batch_norm, is_training)
+
+    #######################################################################
+    # Return
+    #######################################################################
 
     return vlad, weights
 
