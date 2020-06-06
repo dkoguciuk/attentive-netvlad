@@ -62,6 +62,7 @@ LOG_FOUT.write(str(FLAGS)+'\n')
 BATCH_NUM_QUERIES = FLAGS.batch_num_queries
 EVAL_BATCH_SIZE = 1
 NUM_POINTS = 4096
+SAMPLED_NEG = 4000
 POSITIVES_PER_QUERY= FLAGS.positives_per_query
 NEGATIVES_PER_QUERY= FLAGS.negatives_per_query
 MAX_EPOCH = FLAGS.max_epoch
@@ -149,7 +150,7 @@ def train():
 
                 # placeholder for attention layer
                 attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
-                attention_input_sample = tf.placeholder(tf.float32, shape=(None, 1024, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 1024, 64))
 
                 # Mutual attention layer
                 mutual_attention = MutualAttentionLayer()
@@ -244,7 +245,6 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
     global TRAINING_LATENT_VECTORS
 
     is_training = True
-    sampled_neg=4000
     #number of hard negatives in the training tuple
     #which are taken from the sampled negatives
     num_to_take=10
@@ -273,7 +273,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
             elif(len(HARD_NEGATIVES.keys())==0):
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
-                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
+                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:SAMPLED_NEG]
                 hard_negs= get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
                 print(hard_negs)
                 q_tuples.append(get_query_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
@@ -282,7 +282,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
             else:
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
-                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:sampled_neg]
+                negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:SAMPLED_NEG]
                 hard_negs= get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
                 hard_negs= list(set().union(HARD_NEGATIVES[batch_keys[j]], hard_negs))
                 print('hard',hard_negs)

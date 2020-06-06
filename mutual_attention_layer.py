@@ -33,6 +33,11 @@ class MutualAttentionLayer(object):
         anchor = tf.transpose(anchor, perm=[0, 2, 1])
         sample = tf.transpose(sample, perm=[0, 2, 1])
 
+        # If anchor needs to be tiled
+        if anchor.get_shape()[0] == 1 and anchor.get_shape()[0] != sample.get_shape()[0]:
+            sample_no = sample.get_shape()[0]
+            anchor = tf.tile(anchor, (sample_no, 1, 1))
+
         # anchor and sample are of size [batch_size, feature_size, cluster_no]
         attention_input = tf.concat([anchor, sample], axis=-1)
         # print('[MutualAttentionLayer] attention_input', attention_input.shape)

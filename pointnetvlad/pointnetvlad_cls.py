@@ -9,7 +9,8 @@ import tf_util
 from transform_nets import input_transform_net, feature_transform_net
 
 #Adopted from Antoine Meich
-sys.path.append(os.path.join(MODELS_DIR, '../../'))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, '..'))
 import loupe as lp
 
 def placeholder_inputs(batch_num_queries, num_pointclouds_per_query, num_point):
