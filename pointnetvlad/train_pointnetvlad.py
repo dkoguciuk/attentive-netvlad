@@ -16,7 +16,9 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KDTree
 sys.path.append(os.path.join(BASE_DIR, '..'))
 from mutual_attention_layer import MutualAttentionLayer
-from mutual_attention_layer import lazy_quadruplet_loss_with_att
+from losses import lazy_quadruplet_loss
+from losses import lazy_quadruplet_loss_with_att
+
 
 #params
 parser = argparse.ArgumentParser()
@@ -33,7 +35,8 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--margin_1', type=float, default=0.5, help='Margin for hinge loss [default: 0.5]')
 parser.add_argument('--margin_2', type=float, default=0.2, help='Margin for hinge loss [default: 0.2]')
-parser.add_argument('--with-att', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
+parser.add_argument('--mutual', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
+parser.add_argument('--ordering', type=str, help='Listed operations in order')
 FLAGS = parser.parse_args()
 
 BATCH_NUM_QUERIES = FLAGS.batch_num_queries
@@ -51,7 +54,8 @@ DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 MARGIN1 = FLAGS.margin_1
 MARGIN2 = FLAGS.margin_2
-WITH_ATT = FLAGS.with_att
+MUTUAL = FLAGS.mutual
+ORDERING = FLAGS.ordering
 
 TRAIN_FILE = 'generating_queries/training_queries_baseline.pickle'
 TEST_FILE = 'generating_queries/test_queries_baseline.pickle'
@@ -97,6 +101,7 @@ def get_learning_rate(epoch):
     learning_rate = tf.maximum(learning_rate, 0.00001) # CLIP THE LEARNING RATE!
     return learning_rate        
 
+
 def train():
     global HARD_NEGATIVES
     with tf.Graph().as_default():
@@ -118,7 +123,7 @@ def train():
             with tf.variable_scope("query_triplets") as scope:
                 vecs= tf.concat([query, positives, negatives, other_negatives],1)
                 print(vecs)                
-                out_vecs= forward(vecs, is_training_pl, bn_decay=bn_decay)
+                out_vecs = forward(vecs, is_training_pl, bn_decay=bn_decay, mutual=MUTUAL, ordering=ORDERING)
                 print('out_vecs', out_vecs)
                 print('POSITIVES_PER_QUERY', POSITIVES_PER_QUERY)
                 print('NEGATIVES_PER_QUERY', NEGATIVES_PER_QUERY)
@@ -130,7 +135,7 @@ def train():
                 print('neg_vecs', neg_vecs)
                 print('other_neg_vec', other_neg_vec)
 
-            if WITH_ATT:
+            if MUTUAL:
 
                 # placeholder for attention layer
                 attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
@@ -150,6 +155,7 @@ def train():
                 #loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
                 #loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
                 loss = lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
+
             tf.summary.scalar('loss', loss)
 
             # Get training operator
@@ -207,7 +213,7 @@ def train():
                'neg_vecs': neg_vecs,
                'other_neg_vec': other_neg_vec}
 
-        if WITH_ATT:
+        if MUTUAL:
             ops['attention_op'] = attention_op
             ops['attention_input_query'] = attention_input_query
             ops['attention_input_sample'] = attention_input_sample
@@ -220,7 +226,6 @@ def train():
             sys.stdout.flush()
 
             train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver)          
-
 
 
 def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):

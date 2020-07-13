@@ -342,3 +342,167 @@ class NetVLADAtt(PoolingBaseModel):
         #######################################################################
 
         return vlad
+
+
+# Edited based on the original version
+class SelfAttentiveNetVLAD(PoolingBaseModel):
+    """Creates a NetVLAD class.
+    """
+
+    def __init__(self, feature_size, max_samples, cluster_size, output_dim,
+                 add_batch_norm=True, is_training=True, ordering=''):
+        super(self.__class__, self).__init__(
+            feature_size=feature_size,
+            max_samples=max_samples,
+            cluster_size=cluster_size,
+            output_dim=output_dim,
+            gating=False,
+            add_batch_norm=add_batch_norm,
+            is_training=is_training)
+        self.ordering = ordering.split(',')
+
+    def forward(self, reshaped_input):
+        """Forward pass of a NetVLAD block.
+
+        Args:
+        reshaped_input: If your input is in that form:
+        'batch_size' x 'max_samples' x 'feature_size'
+        It should be reshaped in the following form:
+        'batch_size*max_samples' x 'feature_size'
+        by performing:
+        reshaped_input = tf.reshape(input, [-1, features_size])
+
+        Returns:
+        vlad: the pooled vector of size: 'batch_size' x 'output_dim'
+        """
+
+        #######################################################################
+        # 1x1 conv
+        #######################################################################
+
+        cluster_weights = tf.get_variable("cluster_weights",
+                                          [self.feature_size, self.cluster_size],
+                                          initializer=tf.random_normal_initializer(
+                                              stddev=1 / math.sqrt(self.feature_size)))
+
+        activation = tf.matmul(reshaped_input, cluster_weights)
+
+        #######################################################################
+        # Add batch norm after 1x1 conv
+        #######################################################################
+
+        if self.add_batch_norm:
+            activation = slim.batch_norm(
+                activation,
+                center=True,
+                scale=True,
+                is_training=self.is_training,
+                scope="cluster_bn", fused=False)
+
+        #######################################################################
+        # Add bias after 1x1 conv
+        #######################################################################
+
+        else:
+            cluster_biases = tf.get_variable("cluster_biases",
+                                             [self.cluster_size],
+                                             initializer=tf.random_normal_initializer(
+                                                 stddev=1 / math.sqrt(self.feature_size)))
+            activation += cluster_biases
+
+        #######################################################################
+        # Soft assignment to clusters (softmax) after 1x1 conv
+        #######################################################################
+
+        activation = tf.nn.softmax(activation)
+        activation = tf.reshape(activation, [-1, self.max_samples, self.cluster_size])
+
+        #######################################################################
+        # Apply to VLAD core
+        #######################################################################
+
+        a_sum = tf.reduce_sum(activation, -2, keep_dims=True)
+        cluster_weights2 = tf.get_variable("cluster_weights2",
+                                           [1, self.feature_size, self.cluster_size],
+                                           initializer=tf.random_normal_initializer(
+                                               stddev=1 / math.sqrt(self.feature_size)))
+        a = tf.multiply(a_sum, cluster_weights2)
+
+        activation = tf.transpose(activation, perm=[0, 2, 1])
+        reshaped_input = tf.reshape(reshaped_input, [-1, self.max_samples, self.feature_size])
+        vlad = tf.matmul(activation, reshaped_input)
+        vlad = tf.transpose(vlad, perm=[0, 2, 1])
+        vlad = tf.subtract(vlad, a)
+
+        #######################################################################
+        # Intra normalization
+        #######################################################################
+
+        vlad = tf.nn.l2_normalize(vlad, 1)
+        print('VLAD', vlad)
+
+        #######################################################################
+        # Transpose to be B, C, F
+        #######################################################################
+
+        vlad = tf.transpose(vlad, perm=[0, 2, 1])
+        print('VLAD', vlad)
+
+        #######################################################################
+        # Flexible operations
+        #######################################################################
+
+        print(reshaped_input.shape)
+
+        print('NetVLAD operations:', self.ordering)
+        for op in self.ordering:
+
+            ###################################################################
+            # Flattening
+            ###################################################################
+
+            if op == 'flat':
+                print('FLATTENING')
+                vlad = tf.reshape(vlad, [vlad.shape[0], -1])
+                print('VLAD', vlad)
+
+            ###################################################################
+            # L2 normalization
+            ###################################################################
+
+            if op == 'norm':
+                print('NORMALIZING')
+                vlad = tf.nn.l2_normalize(vlad, -1)
+                print('VLAD', vlad)
+
+            ###################################################################
+            # Squeezing
+            ###################################################################
+
+            if 'squeeze' in op:
+                print('SQUEEZING')
+                input_dim = int(vlad.shape[-1])
+                output_dim = int(op.split('=')[1])
+                hidden1_weights = tf.get_variable("hidden1_weights",
+                                                  [vlad.shape[-1], output_dim],
+                                                  initializer=tf.random_normal_initializer(
+                                                      stddev=1 / math.sqrt(input_dim)))
+                vlad = tf.matmul(vlad, hidden1_weights)
+
+                # Batch norm after compression
+                vlad = tf.contrib.layers.batch_norm(vlad,
+                                                    center=True, scale=True,
+                                                    is_training=self.is_training,
+                                                    scope='bn')
+                print('VLAD', vlad)
+
+            ###################################################################
+            # Context gating
+            ###################################################################
+
+            if op == 'cg':
+                print('CONTEXT GATING')
+                vlad = super(self.__class__, self).context_gating(vlad)
+                print('VLAD', vlad)
+
+        return vlad
