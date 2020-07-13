@@ -379,7 +379,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
 
 
         if(epoch>5 and i%700 ==29):
-        #if True:
+        # if True:
             # update cached feature vectors
             TRAINING_LATENT_VECTORS=get_latent_vectors(sess, ops, TRAINING_QUERIES)
             # import pickle
@@ -394,7 +394,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
             # #exit()
 
         if(i%3000==101):
-            model_name = 'model_' + str(i) + '.ckpt'
+            model_name = 'model_after_epoch_{}.ckpt'.format(epoch)
             save_path = saver.save(sess, os.path.join(LOG_DIR, model_name))
             log_string("Model saved in file: %s" % save_path)
 
@@ -433,10 +433,15 @@ def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
 
     if len(latent_vecs.shape) == 3:
 
-        feed_dict = {ops['attention_input_query']: np.expand_dims(query_vec, axis=0),
-                     ops['attention_input_sample']: latent_vecs,
-                     ops['is_training_pl']: False}
-        distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
+        if MUTUAL:
+            feed_dict = {ops['attention_input_query']: np.expand_dims(query_vec, axis=0),
+                         ops['attention_input_sample']: latent_vecs,
+                         ops['is_training_pl']: False}
+            distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
+        else:
+            squared_diff = tf.reduce_sum(tf.squared_difference(np.expand_dims(query_vec, axis=0),
+                                                               latent_vecs), axis=-1)
+            distances = tf.reduce_mean(squared_diff, axis=-1)
 
         # Take n closest
         indices = np.argsort(distances)[:num_to_take]
