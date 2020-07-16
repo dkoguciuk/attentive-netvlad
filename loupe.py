@@ -502,7 +502,16 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
 
             if op == 'cg':
                 print('CONTEXT GATING')
-                vlad = super(self.__class__, self).context_gating(vlad)
+
+                if len(vlad.shape) == 2:
+                    vlad = super(self.__class__, self).context_gating(vlad)
+                elif len(vlad.shape) == 3:
+                    vlad_shape = vlad.shape
+                    vlad = tf.reshape(vlad, (vlad_shape[0]*vlad_shape[1], vlad_shape[2]))
+                    vlad = super(self.__class__, self).context_gating(vlad)
+                    vlad = tf.reshape(vlad, vlad_shape)
+                else:
+                    assert False, 'WTF?'
                 print('VLAD', vlad)
 
         return vlad
