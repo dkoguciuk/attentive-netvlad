@@ -171,7 +171,7 @@ def train():
                 train_op = optimizer.minimize(loss, global_step=batch)
             
             # Add ops to save and restore all the variables.
-            saver = tf.train.Saver()
+            saver = tf.train.Saver(max_to_keep=None)
             
         # Create a session
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
@@ -196,7 +196,6 @@ def train():
         # Restore a model
         # saver.restore(sess, os.path.join(LOG_DIR, "model.ckpt"))
         # print("Model restored.")
-
 
         ops = {'query': query,
                'positives': positives,
@@ -439,9 +438,8 @@ def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
                          ops['is_training_pl']: False}
             distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
         else:
-            squared_diff = tf.reduce_sum(tf.squared_difference(np.expand_dims(query_vec, axis=0),
-                                                               latent_vecs), axis=-1)
-            distances = tf.reduce_mean(squared_diff, axis=-1)
+            squared_diff = np.sum(np.square(np.expand_dims(query_vec, axis=0) - latent_vecs), axis=-1)
+            distances = np.mean(squared_diff, axis=-1)
 
         # Take n closest
         indices = np.argsort(distances)[:num_to_take]

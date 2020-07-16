@@ -9,8 +9,7 @@ import sys
 from tqdm import tqdm
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
-#from pointnetvlad_cls import *
-from pointnetvlad_att_cls import *
+from pointnetvlad_cls import *
 from loading_pointclouds import *
 from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KDTree
@@ -25,6 +24,10 @@ parser.add_argument('--batch_num_queries', type=int, default=3, help='Batch Size
 parser.add_argument('--dimension', type=int, default=256)
 parser.add_argument('--decay_step', type=int, default=200000, help='Decay step for lr decay [default: 200000]')
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.8]')
+parser.add_argument('--mutual', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
+parser.add_argument('--ordering', type=str, help='Listed operations in order')
+parser.add_argument('--ckpt', type=str, default='log/model.ckpt', help='ckpt file path')
+parser.add_argument('--result_filename', type=str, default='result.txt', help='result filename')
 FLAGS = parser.parse_args()
 
 #BATCH_SIZE = FLAGS.batch_size
@@ -37,16 +40,19 @@ GPU_INDEX = FLAGS.gpu
 DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 LOG_DIR = FLAGS.log_dir
+MUTUAL = FLAGS.mutual
+ORDERING = FLAGS.ordering
+RESULT_FILENAME = FLAGS.result_filename
+CKPT = FLAGS.ckpt
+model_file = CKPT
 
-
-RESULTS_FOLDER="results/"
+# Create results folder
+RESULTS_FOLDER = os.path.join(LOG_DIR, "results")
 if not os.path.exists(RESULTS_FOLDER): os.mkdir(RESULTS_FOLDER)
+output_file = os.path.join(RESULTS_FOLDER, RESULT_FILENAME)
 
 DATABASE_FILE= 'generating_queries/oxford_evaluation_database.pickle'
 QUERY_FILE= 'generating_queries/oxford_evaluation_query.pickle'
-
-output_file= RESULTS_FOLDER +'results.txt'
-model_file= "model.ckpt"
 
 DATABASE_SETS= get_sets_dict(DATABASE_FILE)
 QUERY_SETS= get_sets_dict(QUERY_FILE)
@@ -92,23 +98,25 @@ def evaluate():
 
             with tf.variable_scope("query_triplets") as scope:
                 vecs= tf.concat([query, positives, negatives],1)
-                print(vecs)                
-                out_vecs= forward(vecs, is_training_pl, bn_decay=bn_decay)
+                print(vecs)
+                out_vecs = forward(vecs, is_training_pl, bn_decay=bn_decay, mutual=MUTUAL, ordering=ORDERING)
                 print(out_vecs)
                 q_vec, pos_vecs, neg_vecs= tf.split(out_vecs, [1,POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY],1)
                 print(q_vec)
                 print(pos_vecs)
                 print(neg_vecs)
 
-            # placeholder for attention layer
-            attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
-            attention_input_sample = tf.placeholder(tf.float32, shape=(None, 1024, 64))
+            if MUTUAL:
 
-            # Mutual attention layer
-            mutual_attention = MutualAttentionLayer()
+                # placeholder for attention layer
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 1024, 64))
 
-            # Attention op
-            attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+                # Mutual attention layer
+                mutual_attention = MutualAttentionLayer()
+
+                # Attention op
+                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
 
             # Saver
             saver = tf.train.Saver()
@@ -122,7 +130,7 @@ def evaluate():
         sess = tf.Session(config=config)
 
 
-        saver.restore(sess, os.path.join(LOG_DIR, model_file))
+        saver.restore(sess, model_file)
         print("Model restored.")
 
         ops = {'query': query,
@@ -132,10 +140,12 @@ def evaluate():
                'eval_queries': eval_queries,
                'q_vec':q_vec,
                'pos_vecs': pos_vecs,
-               'neg_vecs': neg_vecs,
-               'attention_op': attention_op,
-               'attention_input_query': attention_input_query,
-               'attention_input_sample': attention_input_sample}
+               'neg_vecs': neg_vecs}
+
+        if MUTUAL:
+            ops['attention_op'] = attention_op
+            ops['attention_input_query'] = attention_input_query
+            ops['attention_input_sample'] = attention_input_sample
 
         recall= np.zeros(25)
         count=0
@@ -316,10 +326,14 @@ def get_recall(sess, ops, m, n):
 
         if len(database_output.shape) == 3:
 
-            feed_dict = {ops['attention_input_query']: np.expand_dims(queries_output[i], axis=0),
-                         ops['attention_input_sample']: database_output,
-                         ops['is_training_pl']: False}
-            distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
+            if MUTUAL:
+                feed_dict = {ops['attention_input_query']: np.expand_dims(queries_output[i], axis=0),
+                             ops['attention_input_sample']: database_output,
+                             ops['is_training_pl']: False}
+                distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
+            else:
+                squared_diff = np.sum(np.square(np.expand_dims(queries_output[i], axis=0) - database_output), axis=-1)
+                distances = np.mean(squared_diff, axis=-1)
 
             # Take n closest
             indices = np.argsort(distances)[:num_neighbors]
