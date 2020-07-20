@@ -439,20 +439,18 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
         #######################################################################
 
         vlad = tf.nn.l2_normalize(vlad, 1)
-        print('VLAD', vlad)
+        print('VLAD after intra normalization', vlad)
 
         #######################################################################
         # Transpose to be B, C, F
         #######################################################################
 
         vlad = tf.transpose(vlad, perm=[0, 2, 1])
-        print('VLAD', vlad)
+        print('VLAD after transpose', vlad)
 
         #######################################################################
         # Flexible operations
         #######################################################################
-
-        print(reshaped_input.shape)
 
         print('NetVLAD operations:', self.ordering)
         for op in self.ordering:
@@ -464,7 +462,7 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
             if op == 'flat':
                 print('FLATTENING')
                 vlad = tf.reshape(vlad, [vlad.shape[0], -1])
-                print('VLAD', vlad)
+                print('VLAD after flattening', vlad)
 
             ###################################################################
             # L2 normalization
@@ -473,7 +471,7 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
             if op == 'norm':
                 print('NORMALIZING')
                 vlad = tf.nn.l2_normalize(vlad, -1)
-                print('VLAD', vlad)
+                print('VLAD after normalization', vlad)
 
             ###################################################################
             # Squeezing
@@ -494,7 +492,7 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
                                                     center=True, scale=True,
                                                     is_training=self.is_training,
                                                     scope='bn')
-                print('VLAD', vlad)
+                print('VLAD after squeezing', vlad)
 
             ###################################################################
             # Context gating
@@ -512,6 +510,6 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
                     vlad = tf.reshape(vlad, vlad_shape)
                 else:
                     assert False, 'WTF?'
-                print('VLAD', vlad)
+                print('VLAD after context gating', vlad)
 
         return vlad
