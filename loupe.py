@@ -27,7 +27,8 @@ Antoine Miech, Ivan Laptev, Josef Sivic
 import math
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-import numpy as np
+import transformer_encoder as te
+
 
 class PoolingBaseModel(object):
     """Inherit from this class when implementing new models."""
@@ -519,5 +520,46 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
                 else:
                     assert False, 'WTF?'
                 print('VLAD after context gating', vlad)
+
+            ###################################################################
+            # Context gating
+            ###################################################################
+
+            if 'te' in op:
+                print('Transformer Encoder')
+                setting = (op.split('=')[1]).split('/')
+                num_heads = int(setting[0])
+                num_layers = int(setting[1])
+                dim_feedforward = int(setting[2])
+                with_pos_enc = int(setting[3])
+
+                if len(vlad.shape) == 2:
+                    assert False, 'Cannot perform TE on 2D vector'
+                elif len(vlad.shape) == 3:
+
+                    # TE settings
+                    dim_transformer = vlad.shape[2]
+                    dropout = 0.1
+
+                    # TE encoder
+                    encoder = te.TransformerEncoder(num_layers, dim_transformer, num_heads, dim_feedforward, dropout)
+
+                    # @TODO: Move away from keras!
+                    # @TODO: How to implement positional encoding?
+                    # Positional encoder
+                    if with_pos_enc:
+                        positional_encodings_shape = (vlad.shape[1], vlad.shape[2])
+                        positional_encodings = tf.keras.layers.Input(shape=positional_encodings_shape, name="Positional_Encodings_Input")
+                        print(positional_encodings)
+                        assert False, 'Not implemented yet!'
+                    else:
+                        positional_encodings = None
+
+                    # Apply TE
+                    vlad = encoder(vlad, positional_encodings, self.is_training)
+                    print('VLAD after transformer encoder', vlad)
+                else:
+                    assert False, 'WTF?'
+                print('VLAD after transformer encoder', vlad)
 
         return vlad
