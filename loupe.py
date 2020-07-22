@@ -485,7 +485,15 @@ class SelfAttentiveNetVLAD(PoolingBaseModel):
                                                   [vlad.shape[-1], output_dim],
                                                   initializer=tf.random_normal_initializer(
                                                       stddev=1 / math.sqrt(input_dim)))
-                vlad = tf.matmul(vlad, hidden1_weights)
+                if len(vlad.shape) == 3:
+                    vlad_shape = vlad.shape
+                    vlad = tf.reshape(vlad, (vlad_shape[0]*vlad_shape[1], vlad_shape[2]))
+                    vlad = tf.matmul(vlad, hidden1_weights)
+                    vlad = tf.reshape(vlad, (vlad_shape[0], vlad_shape[1], output_dim))
+                elif len(vlad.shape) == 2 :
+                    vlad = tf.matmul(vlad, hidden1_weights)
+                else:
+                    assert False, 'WTF?'
 
                 # Batch norm after compression
                 vlad = tf.contrib.layers.batch_norm(vlad,
