@@ -74,6 +74,17 @@ def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, o
     return total_loss
 
 
+def squared_l2(a, b):
+    squared_diff = tf.reduce_sum(tf.squared_difference(a, b), axis=-1)
+    if len(a.get_shape()) == 3:
+        distances = squared_diff
+    elif len(a.get_shape()) == 4:
+        distances = tf.reduce_sum(squared_diff, axis=-1)
+    else:
+        assert False, 'WTF?'
+    return distances
+
+
 def best_pos_distance(query, pos_vecs):
     with tf.name_scope('best_pos_distance') as _:
 
@@ -97,14 +108,7 @@ def best_pos_distance(query, pos_vecs):
         # Calc diff
         #######################################################################
 
-        squared_diff = tf.reduce_sum(tf.squared_difference(pos_vecs, query_copies), axis=-1)
-        if len(pos_vecs.get_shape()) == 3:
-            distances = squared_diff
-        elif len(pos_vecs.get_shape()) == 4:
-            distances = tf.reduce_mean(squared_diff, axis=-1)
-        else:
-            assert False, 'WTF?'
-        # print('[best_pos_distance] distances', distances.shape)
+        distances = squared_l2(pos_vecs, query_copies)
 
         #######################################################################
         # Calc best pos
@@ -134,13 +138,7 @@ def lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, margin):
     m = tf.fill([int(batch), int(num_neg)], margin)
 
     # Calulate negative distances
-    squared_diff = tf.reduce_sum(tf.squared_difference(neg_vecs, query_copies), axis=-1)
-    if len(pos_vecs.get_shape()) == 3:
-        neg_distances = squared_diff
-    elif len(pos_vecs.get_shape()) == 4:
-        neg_distances = tf.reduce_mean(squared_diff, axis=-1)
-    else:
-        assert False, 'WTF?'
+    neg_distances = squared_l2(neg_vecs, query_copies)
 
     # Calc triplet loss
     triplet_loss_ = tf.reduce_mean(
@@ -172,13 +170,7 @@ def lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg, m1, m2):
     m2 = tf.fill([int(batch), int(num_neg)], m2)
 
     # Calulate negative distances
-    squared_diff = tf.reduce_sum(tf.squared_difference(neg_vecs, other_neg_copies), axis=-1)
-    if len(pos_vecs.get_shape()) == 3:
-        neg_distances = squared_diff
-    elif len(pos_vecs.get_shape()) == 4:
-        neg_distances = tf.reduce_mean(squared_diff, axis=-1)
-    else:
-        assert False, 'WTF?'
+    neg_distances = squared_l2(neg_vecs, other_neg_copies)
 
     # Calc second loss
     second_loss = tf.reduce_mean(

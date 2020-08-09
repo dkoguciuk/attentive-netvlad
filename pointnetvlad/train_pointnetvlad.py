@@ -16,6 +16,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KDTree
 sys.path.append(os.path.join(BASE_DIR, '..'))
 from mutual_attention_layer import MutualAttentionLayer
+from losses import squared_l2
 from losses import lazy_quadruplet_loss
 from losses import lazy_quadruplet_loss_with_att
 
@@ -438,8 +439,7 @@ def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
                          ops['is_training_pl']: False}
             distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
         else:
-            squared_diff = np.sum(np.square(np.expand_dims(query_vec, axis=0) - latent_vecs), axis=-1)
-            distances = np.mean(squared_diff, axis=-1)
+            distances = squared_l2(np.expand_dims(query_vec, axis=0), latent_vecs)
 
         # Take n closest
         indices = np.argsort(distances)[:num_to_take]
