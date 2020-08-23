@@ -76,9 +76,9 @@ def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, o
 
 def squared_l2(a, b):
     squared_diff = tf.reduce_sum(tf.squared_difference(a, b), axis=-1)
-    if len(a.get_shape()) == 3:
+    if len(a.shape) == 3:
         distances = squared_diff
-    elif len(a.get_shape()) == 4:
+    elif len(a.shape) == 4:
         distances = tf.reduce_sum(squared_diff, axis=-1)
     else:
         assert False, 'WTF?'
