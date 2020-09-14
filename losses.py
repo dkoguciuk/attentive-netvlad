@@ -74,14 +74,13 @@ def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, o
     return total_loss
 
 
-def squared_l2(a, b):
+def squared_l2(a, b, reduce):
     squared_diff = tf.reduce_sum(tf.squared_difference(a, b), axis=-1)
-    if len(a.shape) == 3:
-        distances = squared_diff
-    elif len(a.shape) == 4:
+    if reduce:
         distances = tf.reduce_sum(squared_diff, axis=-1)
     else:
-        assert False, 'WTF?'
+        distances = squared_diff
+
     return distances
 
 
@@ -97,8 +96,10 @@ def best_pos_distance(query, pos_vecs):
 
         num_pos = pos_vecs.get_shape()[1]
         if len(pos_vecs.get_shape()) == 3:
+            reduce = False
             query_copies = tf.tile(query, [1, int(num_pos), 1])  # shape num_pos x output_dim
         elif len(pos_vecs.get_shape()) == 4:
+            reduce = True
             query_copies = tf.tile(query, [1, int(num_pos), 1, 1])  # shape num_pos x output_dim
         else:
             assert False, 'WTF?'
@@ -108,7 +109,7 @@ def best_pos_distance(query, pos_vecs):
         # Calc diff
         #######################################################################
 
-        distances = squared_l2(pos_vecs, query_copies)
+        distances = squared_l2(pos_vecs, query_copies, reduce=reduce)
 
         #######################################################################
         # Calc best pos
@@ -129,8 +130,10 @@ def lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, margin):
     num_neg = neg_vecs.get_shape()[1]
     batch = q_vec.get_shape()[0]
     if len(pos_vecs.get_shape()) == 3:
+        reduce = False
         query_copies = tf.tile(q_vec, [1, int(num_neg), 1])
     elif len(pos_vecs.get_shape()) == 4:
+        reduce = True
         query_copies = tf.tile(q_vec, [1, int(num_neg), 1, 1])
     else:
         assert False, 'WTF?'
@@ -138,7 +141,7 @@ def lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, margin):
     m = tf.fill([int(batch), int(num_neg)], margin)
 
     # Calulate negative distances
-    neg_distances = squared_l2(neg_vecs, query_copies)
+    neg_distances = squared_l2(neg_vecs, query_copies, reduce=reduce)
 
     # Calc triplet loss
     triplet_loss_ = tf.reduce_mean(
@@ -161,8 +164,10 @@ def lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg, m1, m2):
     num_neg = neg_vecs.get_shape()[1]
     batch = q_vec.get_shape()[0]
     if len(pos_vecs.get_shape()) == 3:
+        reduce = False
         other_neg_copies = tf.tile(other_neg, [1, int(num_neg), 1])
     elif len(pos_vecs.get_shape()) == 4:
+        reduce = True
         other_neg_copies = tf.tile(other_neg, [1, int(num_neg), 1, 1])
     else:
         assert False, 'WTF?'
@@ -170,7 +175,7 @@ def lazy_quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg, m1, m2):
     m2 = tf.fill([int(batch), int(num_neg)], m2)
 
     # Calulate negative distances
-    neg_distances = squared_l2(neg_vecs, other_neg_copies)
+    neg_distances = squared_l2(neg_vecs, other_neg_copies, reduce=reduce)
 
     # Calc second loss
     second_loss = tf.reduce_mean(

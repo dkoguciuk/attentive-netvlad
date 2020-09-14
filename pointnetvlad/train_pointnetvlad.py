@@ -152,6 +152,14 @@ def train():
                 loss = lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec,
                                                      MARGIN1, MARGIN2)
             else:
+
+                # placeholder for attention layer
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 64, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 64, 64))
+
+                # Attention op
+                attention_op = squared_l2(attention_input_query, attention_input_sample, reduce=True)
+
                 #loss = lazy_triplet_loss(q_vec, pos_vecs, neg_vecs, MARGIN1)
                 #loss = softmargin_loss(q_vec, pos_vecs, neg_vecs)
                 #loss = quadruplet_loss(q_vec, pos_vecs, neg_vecs, other_neg_vec, MARGIN1, MARGIN2)
@@ -211,12 +219,10 @@ def train():
                'q_vec':q_vec,
                'pos_vecs': pos_vecs,
                'neg_vecs': neg_vecs,
-               'other_neg_vec': other_neg_vec}
-
-        if MUTUAL:
-            ops['attention_op'] = attention_op
-            ops['attention_input_query'] = attention_input_query
-            ops['attention_input_sample'] = attention_input_sample
+               'other_neg_vec': other_neg_vec,
+               'attention_op': attention_op,
+               'attention_input_query': attention_input_query,
+               'attention_input_sample': attention_input_sample}
 
 
         for epoch in range(MAX_EPOCH):
@@ -262,7 +268,7 @@ def train_one_epoch(sess, ops, train_writer, test_writer, epoch, saver):
                 query=get_feature_representation(TRAINING_QUERIES[batch_keys[j]]['query'], sess, ops)
                 random.shuffle(TRAINING_QUERIES[batch_keys[j]]['negatives'])
                 negatives=TRAINING_QUERIES[batch_keys[j]]['negatives'][0:SAMPLED_NEG]
-                hard_negs= get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
+                hard_negs = get_random_hard_negatives(sess, ops, query, negatives, num_to_take)
                 q_tuples.append(get_query_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
                 # q_tuples.append(get_rotated_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
                 # q_tuples.append(get_jittered_tuple(TRAINING_QUERIES[batch_keys[j]],POSITIVES_PER_QUERY,NEGATIVES_PER_QUERY, TRAINING_QUERIES, hard_negs, other_neg=True))
@@ -439,7 +445,9 @@ def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
                          ops['is_training_pl']: False}
             distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
         else:
-            distances = squared_l2(np.expand_dims(query_vec, axis=0), latent_vecs)
+            feed_dict = {ops['attention_input_query']: np.expand_dims(query_vec, axis=0),
+                         ops['attention_input_sample']: latent_vecs}
+            distances = sess.run(ops['attention_op'], feed_dict=feed_dict)
 
         # Take n closest
         indices = np.argsort(distances)[:num_to_take]
