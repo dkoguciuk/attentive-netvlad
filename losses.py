@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def best_pos_distance_with_att(mutual_attention, query, pos_vecs):
+def best_pos_distance_with_att(mutual_attention, query, pos_vecs, is_training):
 
     with tf.name_scope('best_pos_distance') as _:
 
@@ -12,7 +12,7 @@ def best_pos_distance_with_att(mutual_attention, query, pos_vecs):
         query_copies = tf.tile(query, [1, int(num_pos), 1, 1])  # shape num_pos x output_dim
         # print('[best_pos_distance] query_copies', query_copies.shape)
 
-        distances = mutual_attention.forward(query_copies, pos_vecs)
+        distances = mutual_attention.forward(query_copies, pos_vecs, is_training)
         # print('[best_pos_distance] distances', distances.shape)
 
         # Find min positive
@@ -20,10 +20,10 @@ def best_pos_distance_with_att(mutual_attention, query, pos_vecs):
         return best_pos
 
 
-def lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, margin):
+def lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, margin, is_training):
 
     # Calc best_pos
-    best_pos = best_pos_distance_with_att(mutual_attention, q_vec, pos_vecs)
+    best_pos = best_pos_distance_with_att(mutual_attention, q_vec, pos_vecs, is_training)
 
     # Prepare to calc triplet loss
     num_neg = neg_vecs.get_shape()[1]
@@ -33,7 +33,7 @@ def lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, marg
     m = tf.fill([int(batch), int(num_neg)], margin)
 
     # Calulate negative distances
-    neg_distances = mutual_attention.forward(query_copies, neg_vecs)
+    neg_distances = mutual_attention.forward(query_copies, neg_vecs, is_training)
 
     # Calc triplet loss
     triplet_loss = tf.reduce_mean(
@@ -44,13 +44,13 @@ def lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, marg
     return triplet_loss
 
 
-def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg, m1, m2):
+def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg, m1, m2, is_training):
 
     # Calc lazy triplet loss
-    trip_loss = lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, m1)
+    trip_loss = lazy_triplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, m1, is_training)
 
     # Calc bes pos
-    best_pos = best_pos_distance_with_att(mutual_attention, q_vec, pos_vecs)
+    best_pos = best_pos_distance_with_att(mutual_attention, q_vec, pos_vecs, is_training)
     num_neg = neg_vecs.get_shape()[1]
     batch = q_vec.get_shape()[0]
 
@@ -60,7 +60,7 @@ def lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, o
     m2 = tf.fill([int(batch), int(num_neg)], m2)
 
     # Calulate negative distances
-    neg_distances = mutual_attention.forward(neg_vecs, other_neg_copies)
+    neg_distances = mutual_attention.forward(neg_vecs, other_neg_copies, is_training)
 
     # Calc second loss
     second_loss = tf.reduce_mean(

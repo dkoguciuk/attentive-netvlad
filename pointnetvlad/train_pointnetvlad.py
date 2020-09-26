@@ -36,7 +36,7 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--margin_1', type=float, default=0.5, help='Margin for hinge loss [default: 0.5]')
 parser.add_argument('--margin_2', type=float, default=0.2, help='Margin for hinge loss [default: 0.2]')
-parser.add_argument('--mutual', type=int, default=0, help='Train with the mutual attention module (0:No 1:Yes) [default: 0]')
+parser.add_argument('--mutual', type=str, help='Train with the mutual attention module, read code for more info')
 parser.add_argument('--ordering', type=str, help='Listed operations in order')
 FLAGS = parser.parse_args()
 
@@ -124,7 +124,7 @@ def train():
             with tf.variable_scope("query_triplets") as scope:
                 vecs= tf.concat([query, positives, negatives, other_negatives],1)
                 print(vecs)                
-                out_vecs = forward(vecs, is_training_pl, bn_decay=bn_decay, mutual=MUTUAL, ordering=ORDERING)
+                out_vecs = forward(vecs, is_training_pl, bn_decay=bn_decay, ordering=ORDERING)
                 print('out_vecs', out_vecs)
                 print('POSITIVES_PER_QUERY', POSITIVES_PER_QUERY)
                 print('NEGATIVES_PER_QUERY', NEGATIVES_PER_QUERY)
@@ -136,21 +136,22 @@ def train():
                 print('neg_vecs', neg_vecs)
                 print('other_neg_vec', other_neg_vec)
 
-            if MUTUAL:
+            if MUTUAL is not None:
 
                 # placeholder for attention layer
-                attention_input_query = tf.placeholder(tf.float32, shape=(1, 1024, 64))
-                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 1024, 64))
+                attention_input_query = tf.placeholder(tf.float32, shape=(1, 64, 64))
+                attention_input_sample = tf.placeholder(tf.float32, shape=(SAMPLED_NEG, 64, 64))
 
                 # Mutual attention layer
-                mutual_attention = MutualAttentionLayer()
+                mutual_attention = MutualAttentionLayer(method=MUTUAL, feature_size=64, cluster_size=64)
+
 
                 # Attention op
-                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample)
+                attention_op = mutual_attention.forward(attention_input_query, attention_input_sample, is_training_pl)
 
                 # Loss
                 loss = lazy_quadruplet_loss_with_att(mutual_attention, q_vec, pos_vecs, neg_vecs, other_neg_vec,
-                                                     MARGIN1, MARGIN2)
+                                                     MARGIN1, MARGIN2, is_training_pl)
             else:
 
                 # placeholder for attention layer

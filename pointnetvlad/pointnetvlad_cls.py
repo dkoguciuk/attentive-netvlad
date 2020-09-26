@@ -22,7 +22,7 @@ OUTPUT_DIM = 256
 FEATURE_SIZE = 1024
 
 #Adopted from the original pointnet code
-def forward(point_cloud, is_training, bn_decay=None, mutual=False, ordering=''):
+def forward(point_cloud, is_training, bn_decay=None, ordering=''):
     """PointNetVLAD,    INPUT is batch_num_queries X num_pointclouds_per_query X num_points_per_pointcloud X 3, 
                         OUTPUT batch_num_queries X num_pointclouds_per_query X output_dim """
     batch_num_queries = point_cloud.get_shape()[0].value
@@ -65,31 +65,17 @@ def forward(point_cloud, is_training, bn_decay=None, mutual=False, ordering=''):
     net= tf.reshape(net,[-1,FEATURE_SIZE])
     net = tf.nn.l2_normalize(net,1)
 
-    # With mutual attention?
-    if mutual:
-
-        NetVLAD = lp.NetVLADAtt(feature_size=FEATURE_SIZE, max_samples=num_points, cluster_size=CLUSTER_SIZE,
-                                output_dim=OUTPUT_DIM, gating=False, add_batch_norm=True,
-                                is_training=is_training)
-
-        output = NetVLAD.forward(net)
-        print(output)
-
-        # Reshape output
-        output = tf.reshape(output, [batch_num_queries, num_pointclouds_per_query, output.shape[-2], output.shape[-1]])
-
     # Standard NetVLAD
-    else:
-        NetVLAD = lp.SelfAttentiveNetVLAD(feature_size=FEATURE_SIZE, max_samples=num_points, cluster_size=CLUSTER_SIZE,
-                                          output_dim=OUTPUT_DIM, add_batch_norm=True, is_training=is_training,
-                                          ordering=ordering)
+    NetVLAD = lp.SelfAttentiveNetVLAD(feature_size=FEATURE_SIZE, max_samples=num_points, cluster_size=CLUSTER_SIZE,
+                                      output_dim=OUTPUT_DIM, add_batch_norm=True, is_training=is_training,
+                                      ordering=ordering)
 
-        output = NetVLAD.forward(net)
-        print(output)
+    output = NetVLAD.forward(net)
+    print(output)
 
-        # Reshape output
-        shape = [batch_num_queries, num_pointclouds_per_query] + list(output.shape[1:])
-        output = tf.reshape(output, shape)
-        print(output)
+    # Reshape output
+    shape = [batch_num_queries, num_pointclouds_per_query] + list(output.shape[1:])
+    output = tf.reshape(output, shape)
+    print(output)
 
     return output
