@@ -440,7 +440,7 @@ def get_random_hard_negatives(sess, ops, query_vec, random_negs, num_to_take):
 
     if len(latent_vecs.shape) == 3:
 
-        if MUTUAL:
+        if MUTUAL is not None:
             feed_dict = {ops['attention_input_query']: np.expand_dims(query_vec, axis=0),
                          ops['attention_input_sample']: latent_vecs,
                          ops['is_training_pl']: False}

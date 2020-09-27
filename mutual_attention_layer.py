@@ -21,9 +21,9 @@ class MutualAttentionLayer(object):
             self.gating_weights = tf.get_variable("attention_layer_weights", [2*self.feature_size, self.feature_size],
                                                   initializer=tf.random_normal_initializer(
                                                       stddev=1 / math.sqrt(2*self.feature_size)))
-            # self.gating_biases = tf.get_variable("attention_layer_biases", [self.feature_size],
-            #                                      initializer=tf.random_normal_initializer(
-            #                                          stddev=1 / math.sqrt(self.feature_size)))
+            self.gating_biases = tf.get_variable("attention_layer_biases", [self.feature_size],
+                                                 initializer=tf.random_normal_initializer(
+                                                     stddev=1 / math.sqrt(self.feature_size)))
 
     def forward(self, anchor, sample, is_training):
 
@@ -48,6 +48,8 @@ class MutualAttentionLayer(object):
             anchor = tf.tile(anchor, (sample_no, 1, 1))
 
         # anchor and sample are of size [batch_size, cluster_no, feature_size]
+        print('[MutualAttentionLayer] anchor', anchor.shape)
+        print('[MutualAttentionLayer] sample', sample.shape)
         attention_input = tf.concat([anchor, sample], axis=-1)
         print('[MutualAttentionLayer] attention_input', attention_input.shape)
 
@@ -90,8 +92,8 @@ class MutualAttentionLayer(object):
 
             # Calc gates
             gates = tf.matmul(attention_input, self.gating_weights)
-            gates = tf.layers.batch_normalization(gates, center=True, scale=True, training=is_training)
-            # gates += self.gating_biases
+            # gates = tf.layers.batch_normalization(gates, center=True, scale=True, training=is_training)
+            gates += self.gating_biases
             gates = tf.sigmoid(gates)
             print('[MutualAttentionLayer] gates', gates.shape)
 
